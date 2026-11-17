@@ -1,0 +1,15 @@
+{
+  "series_id": "pilot-water",
+  "source_version": "day-1",
+  "unit": "mg/L",
+  "rows": [
+    {"row_no": 0, "value": 1},
+    {"row_no": 1, "value": 1},
+    {"row_no": 2, "value": 2},
+    {"row_no": 3, "value": 2},
+    {"row_no": 4, "value": 7},
+    {"row_no": 5, "value": 7},
+    {"row_no": 6, "value": 9},
+    {"row_no": 7, "value": 9}
+  ]
+}
