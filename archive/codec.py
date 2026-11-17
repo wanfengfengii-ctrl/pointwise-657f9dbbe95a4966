@@ -9,16 +9,22 @@ from selection.request import AnalysisRequest, validate_request
 from selection.statistics import SegmentStatistics
 from selection.partition import LeafSpan, apply_split, initial_partition, validate_partition
 from selection.greedy import SplitStep, AnalysisResult
+from selection.event import (StageRecord, SelectionEvent, validate_stage_record,
+                             validate_selection_event)
 from inference.contrasts import ContrastVector
 from inference.normal import NormalSummary
 from inference.unadjusted import UnadjustedResult
 from inference.report import ContrastReport, UNADJUSTED_WARNING
+from inference.selective import (QuadRoot, SupportInterval, SelectiveReport,
+                                 validate_quad_root, validate_support_interval,
+                                 validate_selective_report)
 from archive.schema import FixedTask, ArtifactEnvelope, CorruptArtifact
 
 _TYPES = {kind.__name__: kind for kind in (
     SampleRow, ImportPayload, SeriesRevision, AnalysisRequest, SegmentStatistics,
     SplitStep, AnalysisResult, ContrastVector, NormalSummary, UnadjustedResult,
-    ContrastReport, FixedTask, ArtifactEnvelope)}
+    ContrastReport, FixedTask, ArtifactEnvelope, StageRecord, SelectionEvent,
+    QuadRoot, SupportInterval, SelectiveReport)}
 
 
 def canonical_json(value):
@@ -39,7 +45,7 @@ def _pack(value):
                            for field in fields(value)}}
     if isinstance(value, tuple):
         return {"$tuple": [_pack(item) for item in value]}
-    if value is None or type(value) in (str, int, float):
+    if value is None or type(value) in (str, int, float, bool):
         if type(value) is float and not math.isfinite(value):
             raise ValueError("nonfinite encoded number")
         return value
@@ -47,7 +53,7 @@ def _pack(value):
 
 
 def _unpack(value):
-    if value is None or type(value) in (str, int, float):
+    if value is None or type(value) in (str, int, float, bool):
         if type(value) is float and not math.isfinite(value):
             raise ValueError("nonfinite number")
         return value
@@ -176,14 +182,28 @@ def _validate(value):
         identity(value.revision_id, "revision_id")
         if type(value.request) is not AnalysisRequest:
             raise ValueError("invalid task parameters")
+    elif isinstance(value, StageRecord):
+        validate_stage_record(value)
+    elif isinstance(value, SelectionEvent):
+        validate_selection_event(value)
+    elif isinstance(value, QuadRoot):
+        validate_quad_root(value)
+    elif isinstance(value, SupportInterval):
+        validate_support_interval(value)
+    elif isinstance(value, SelectiveReport):
+        validate_selective_report(value)
     elif isinstance(value, ArtifactEnvelope):
         identity(value.artifact_id, "artifact_id")
         identity(value.parent_id, "parent_id")
-        expected = {"analysis": AnalysisResult, "report": ContrastReport}
+        expected = {"analysis": AnalysisResult, "report": ContrastReport,
+                    "selection": SelectionEvent,
+                    "selective_report": SelectiveReport}
         if value.kind not in expected or type(value.data) is not expected[value.kind]:
             raise ValueError("invalid artifact kind")
-        if value.kind == "report" and value.parent_id != value.data.analysis_id:
-            raise ValueError("report parent mismatch")
+        if value.kind in ("report", "selection") and value.parent_id != value.data.analysis_id:
+            raise ValueError("artifact parent mismatch")
+        if value.kind == "selective_report" and value.parent_id != value.data.selection_id:
+            raise ValueError("artifact parent mismatch")
 
 
 def _encode(value, kind):

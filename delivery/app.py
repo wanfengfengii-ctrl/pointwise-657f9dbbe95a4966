@@ -13,6 +13,7 @@ from archive.results import ResultRepository
 from archive.transactions import PublicationCoordinator
 from delivery.analysis import AnalysisCoordinator
 from delivery.reports import ReportCoordinator
+from delivery.selective import SelectiveCoordinator
 from delivery.export import export_report
 from delivery.verification import verify_export_package
 
@@ -26,6 +27,7 @@ class WaterQualityApp:
         self.results = ResultRepository(self.store, self.revisions, self.tasks, self.publications)
         self.analysis = AnalysisCoordinator(self.tasks, self.revisions, self.results)
         self.reports = ReportCoordinator(self.revisions, self.tasks, self.results)
+        self.selective = SelectiveCoordinator(self.revisions, self.tasks, self.results)
 
     @classmethod
     def open(cls, path, fault_hook=None):
@@ -52,6 +54,12 @@ class WaterQualityApp:
 
     def report_contrast(self, analysis_id, left_leaf):
         return self.reports.report_contrast(analysis_id, left_leaf)
+
+    def freeze_selection(self, analysis_id):
+        return self.selective.freeze_selection(analysis_id)
+
+    def selective_test(self, selection_id, left_leaf):
+        return self.selective.selective_test(selection_id, left_leaf)
 
     def read_result(self, artifact_id):
         return self.results.read_result(artifact_id)

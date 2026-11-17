@@ -3,8 +3,8 @@
   "commands": {
     "initialize": ["python3.11", "-B", "-m", "delivery.app", "init", "--db", "quality.sqlite"],
     "import_sample": ["python3.11", "-B", "-m", "delivery.app", "import", "--db", "quality.sqlite", "examples/day.json"],
-    "verify": ["python3.11", "-B", "-m", "unittest", "discover", "-s", "tests", "-t", ".", "-v"],
-    "demo": ["python3.11", "-B", "-m", "delivery.app", "demo"]
+    "verify": ["python3.11", "-B", "selective_examples.py", "--verify-all"],
+    "demo": ["python3.11", "-B", "selective_examples.py", "--demo"]
   },
   "export_argv_template": ["python3.11", "-B", "-m", "delivery.app", "export", "--db", "quality.sqlite", "REPORT_ID", "--out", "review.json"],
   "verify_package_argv_template": ["python3.11", "-B", "-m", "delivery.app", "verify-package", "review.json"]

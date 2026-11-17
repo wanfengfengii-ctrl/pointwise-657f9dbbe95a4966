@@ -52,6 +52,189 @@ def require(condition, message):
         raise AssertionError(message)
 
 
+# Independent accounting: hand-derived oracles, never the production solver.
+EXTRA_CASES = (
+    {
+        # Zero-gain ties on the observed data: every candidate gains 0, the
+        # lexicographic rule decides. All constraints are tangents at z=0
+        # sharing one endpoint (identity comparison), so S is the whole line
+        # with both infinite tails and p = 1 exactly.
+        "name": "constant",
+        "values": (5, 5, 5, 5, 5, 5, 5, 5),
+        "noise": 1, "left": 0,
+        "steps": ((0, 2, 8), (2, 4, 8)),
+        "z": F(0), "variance": F(1),
+        "support": (interval(None, None),),
+        "p": 1.0,
+        "probes": ((-100, True), (-1, True), (0, True), (F(7, 2), True),
+                   (100, True)),
+    },
+)
+
+SINGLETON_CASE = {
+    # S = {0}: the winner gain is identically zero and every competitor gain
+    # is a positive multiple of z^2, so only z=0 keeps the sequence. The
+    # conditional mass is zero, below 1e-8, and no report may be published.
+    "name": "singleton",
+    "values": (5, 5, 5, 5, 5, 5, 5, 5),
+    "noise": 1, "left": 1,
+    "steps": ((0, 2, 8), (2, 4, 8)),
+    "probes": ((-2, False), (-1, False), (0, True), (1, False), (2, False)),
+}
+
+# Hand-computed solution sets for synthetic constraint lists (A, B, C, strict)
+# with D(z) = A z^2 + B z + C required positive (strict) or nonnegative.
+CONSTRAINT_ORACLES = (
+    ("isolated_point",
+     ((F(1), F(-4), F(3), False), (F(1), F(-8), F(15), False)),
+     (interval(None, F(1), False, True),
+      interval(F(3), F(3), True, True),
+      interval(F(5), None, True, False))),
+    ("strict_tangent",
+     ((F(1), F(-4), F(4), True),),
+     (interval(None, F(2)), interval(F(2), None))),
+    ("nonstrict_tangent",
+     ((F(1), F(-4), F(4), False),),
+     (interval(None, None),)),
+    ("identical_zero_strict", ((F(0), F(0), F(0), True),), ()),
+    ("identical_zero_nonstrict", ((F(0), F(0), F(0), False),),
+     (interval(None, None),)),
+    ("linear_strict",
+     ((F(0), F(2), F(-1), True),),
+     (interval(F(1, 2), None),)),
+    ("linear_nonstrict",
+     ((F(0), F(-2), F(1), False),),
+     (interval(None, F(1, 2), False, True),)),
+    ("downward_tangent",
+     ((F(-1), F(4), F(-4), False),),
+     (interval(F(2), F(2), True, True),)),
+    ("downward_two_roots",
+     ((F(-1), F(4), F(-3), False),),
+     (interval(F(1), F(3), True, True),)),
+    ("upward_strict",
+     ((F(1), F(-4), F(3), True),),
+     (interval(None, F(1)), interval(F(3), None))),
+    ("quadratic_irrational",
+     ((F(8), F(-68), F(-289), False),),
+     (interval(None, {"poly": (8, -68, -289), "root": 0}, False, True),
+      interval({"poly": (8, -68, -289), "root": 1}, None, True, False))),
+    # A rational endpoint lying strictly between the two irrational roots.
+    ("quadratic_with_rational_between",
+     ((F(8), F(-68), F(-289), False), (F(0), F(1), F(0), False)),
+     (interval({"poly": (8, -68, -289), "root": 1}, None, True, False),)),
+    ("quadratic_with_rational_inside_gap",
+     ((F(8), F(-68), F(-289), False), (F(0), F(-1), F(5), False)),
+     (interval(None, {"poly": (8, -68, -289), "root": 0}, False, True),)),
+    ("no_real_root_positive", ((F(1), F(0), F(1), True),),
+     (interval(None, None),)),
+    ("no_real_root_negative", ((F(-1), F(0), F(-1), False),), ()),
+)
+
+
+def endpoint_minus_rational(endpoint, z):
+    """Sign of (endpoint - z) for rational z; independent exact comparison."""
+    if isinstance(endpoint, F):
+        return (endpoint > z) - (endpoint < z)
+    a, b, c = endpoint["poly"]
+    value = a * z * z + b * z + c
+    if value < 0:  # z lies strictly between the two roots
+        return 1 if endpoint["root"] == 1 else -1
+    # value > 0: roots are irrational, so z is outside them
+    return 1 if z < F(-b, 2 * a) else -1
+
+
+def support_contains(support, z):
+    for iv in support:
+        lo, hi = iv["lo"], iv["hi"]
+        if lo is not None:
+            sign = endpoint_minus_rational(lo, z)
+            if sign > 0 or (sign == 0 and not iv["lo_closed"]):
+                continue
+        if hi is not None:
+            sign = endpoint_minus_rational(hi, z)
+            if sign < 0 or (sign == 0 and not iv["hi_closed"]):
+                continue
+        return True
+    return False
+
+
+def check_constraint_oracles():
+    from inference.selective import build_support
+
+    def norm_endpoint(endpoint):
+        if endpoint is None or isinstance(endpoint, F):
+            return endpoint
+        if isinstance(endpoint, dict):
+            return ("poly", tuple(endpoint["poly"]), endpoint["root"])
+        return ("poly", tuple(endpoint.poly), endpoint.root)
+
+    for name, constraints, expected in CONSTRAINT_ORACLES:
+        actual = build_support(tuple(constraints))
+        want = tuple((norm_endpoint(iv["lo"]), norm_endpoint(iv["hi"]),
+                      iv["lo_closed"], iv["hi_closed"]) for iv in expected)
+        got = tuple((norm_endpoint(iv.lo), norm_endpoint(iv.hi),
+                     iv.lo_closed, iv.hi_closed) for iv in actual)
+        require(got == want, "constraint oracle differs: " + name)
+
+
+def check_independent():
+    check_constraint_oracles()
+    for case in EXTRA_CASES:
+        steps, leaves, eta, z, q, u = reference_parts(case)
+        require(tuple((s["l"], s["c"], s["r"]) for s in steps) == case["steps"],
+                "independent winning sequence differs: " + case["name"])
+        require(z == case["z"] and q * case["noise"] == case["variance"],
+                "independent contrast differs: " + case["name"])
+        with WaterQualityApp.open(":memory:") as app:
+            revision = app.put_series(case["name"], "v1", "mg/L", rows(case["values"]))
+            analysis = app.execute_analysis(app.create_analysis(revision, case["noise"], 2, 2))
+            event = app.read_result(app.freeze_selection(analysis))
+            active = [(0, len(case["values"]))]
+            for stage, winner in zip(event["data"]["stages"], case["steps"]):
+                candidates = tuple(sorted((l, c, r) for l, r in active
+                                          for c in range(l + 2, r - 1)))
+                require(stage["candidates"] == candidates and stage["winner"] == winner,
+                        "independent candidate enumeration differs: " + case["name"])
+                l, c, r = winner
+                active.remove((l, r))
+                active.extend(((l, c), (c, r)))
+                active.sort()
+            data = app.read_result(app.selective_test(
+                event["artifact_id"], case["left"]))["data"]
+            require(data["support"] == case["support"],
+                    "hand-derived support differs: " + case["name"])
+            require(data["p"] == case["p"], "exact probability differs: " + case["name"])
+            for probe, expected in case["probes"]:
+                values = tuple(a + e * F(probe) / q for a, e in zip(u, eta))
+                actual, _ = independent_greedy(values, 2, 2)
+                same = tuple((s["l"], s["c"], s["r"]) for s in actual) == case["steps"]
+                require(same == expected, "rational probe differs: " + case["name"])
+                require(support_contains(data["support"], F(probe)) == expected,
+                        "support membership differs: " + case["name"])
+    case = SINGLETON_CASE
+    steps, leaves, eta, z, q, u = reference_parts(case)
+    require(tuple((s["l"], s["c"], s["r"]) for s in steps) == case["steps"],
+            "independent winning sequence differs: " + case["name"])
+    for probe, expected in case["probes"]:
+        values = tuple(a + e * F(probe) / q for a, e in zip(u, eta))
+        actual, _ = independent_greedy(values, 2, 2)
+        same = tuple((s["l"], s["c"], s["r"]) for s in actual) == case["steps"]
+        require(same == expected, "singleton probe differs")
+    with WaterQualityApp.open(":memory:") as app:
+        revision = app.put_series(case["name"], "v1", "mg/L", rows(case["values"]))
+        analysis = app.execute_analysis(app.create_analysis(revision, case["noise"], 2, 2))
+        selection = app.freeze_selection(analysis)
+        before = snapshot(app)
+        try:
+            app.selective_test(selection, case["left"])
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("zero conditional mass was not rejected")
+        require(snapshot(app) == before, "rejected test left partial artifacts")
+    print("Independent candidate, endpoint, interval and probability accounting verified.")
+
+
 def reference_parts(case):
     values = tuple(map(F, case["values"]))
     steps, leaves = independent_greedy(values, 2, 2)
@@ -249,6 +432,7 @@ def main():
         if not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful():
             return 1
         run_v2()
+        check_independent()
     elif mode == "demo":
         run_v2(demo=True)
     return 0
